@@ -5,11 +5,11 @@ namespace Nopnag.EventBus.Tests
 {
   public class EventBusTest
   {
-    public class Amount : object, IIParameter
+    public class Amount : object, IParameter
     {
     }
 
-    public class Destination : Warrior, IIParameter
+    public class Destination : Warrior, IParameter
     {
     }
 
@@ -17,7 +17,7 @@ namespace Nopnag.EventBus.Tests
     {
     }
 
-    public class Source : Warrior, IIParameter
+    public class Source : Warrior, IParameter
     {
     }
 
@@ -25,7 +25,7 @@ namespace Nopnag.EventBus.Tests
     {
     }
 
-    public class WeaponType : object, IIParameter
+    public class WeaponType : object, IParameter
     {
     }
 

@@ -10,7 +10,7 @@ namespace Nopnag.EventBusLib // Updated namespace
   }
 
   // Interface for parameter types, assuming it's needed by BusEvent
-  public interface IIParameter {}
+  public interface IParameter {}
 
   public class BusEvent
   {
@@ -27,7 +27,7 @@ namespace Nopnag.EventBusLib // Updated namespace
 
     public virtual bool IsPropagationStopped { get; set; }
 
-    public object Get<T>() where T : IIParameter
+    public object Get<T>() where T : IParameter
     {
       object value;
       if (_dict.TryGetValue(typeof(T), out value)) return value;
@@ -54,7 +54,7 @@ namespace Nopnag.EventBusLib // Updated namespace
       return this;
     }
 
-    public BusEvent Set<T>(object value) where T : IIParameter
+    public BusEvent Set<T>(object value) where T : IParameter
     {
       _dict[typeof(T)] = value;
       return this;

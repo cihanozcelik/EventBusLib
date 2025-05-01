@@ -9,7 +9,7 @@ This EventBus implementation provides a straightforward way to decouple differen
 ## Key Features
 
 *   **Type-Safe Events:** Uses generic event types (`BusEvent`) for compile-time safety.
-*   **Parameter Querying:** Allows listeners to subscribe only to events that match specific parameter values or types. Parameter types implement `IIParameter` and can directly represent the filtered data (like an object reference or enum) or hold a value.
+*   **Parameter Querying:** Allows listeners to subscribe only to events that match specific parameter values or types. Parameter types implement `IParameter` and can directly represent the filtered data (like an object reference or enum) or hold a value.
 *   **Efficient Filtering:** Filtering logic is handled *internally* by the EventBus before invoking listeners. When an event is raised, the system efficiently finds only the relevant subscribers based on their `Where` clauses, leading to significantly better performance compared to manual checking in every listener.
 *   **Decoupled Architecture:** Promotes cleaner code by reducing direct dependencies between components.
 *   **Easy Unsubscription:** Provides a listener handle (`IIListener`) for easy removal of subscriptions.
@@ -18,11 +18,11 @@ This EventBus implementation provides a straightforward way to decouple differen
 ## How It Works
 
 1.  **Define Events:** Create classes that inherit from `BusEvent`.
-2.  **Define Parameters (Optional, for Filtering):** If you want to filter events based on parameters, define types (classes or structs) that implement the marker interface `IIParameter`. These types can directly inherit from relevant classes (like `Warrior` in the tests) or `object`.
+2.  **Define Parameters (Optional, for Filtering):** If you want to filter events based on parameters, define types (classes or structs) that implement the marker interface `IParameter`. These types can directly inherit from relevant classes (like `Warrior` in the tests) or `object`.
 3.  **Set Parameters (Optional):** Use `eventInstance.Set<ParameterType>(parameterValue)` to attach filterable parameters to an event instance. `parameterValue` is the actual data (instance, enum value, int, etc.) you want to filter by.
 4.  **Raise Events:** Use `EventBus.Raise(yourEventInstance)` to publish an event. The EventBus efficiently routes the event only to matching listeners.
-5.  **Listen to Events:** Use `EventBus.Listen<YourEventType>(handler)` to subscribe to all events of a specific type.
-6.  **Filtered Listening:** Use `EventBus.Query<YourEventType>().Where<ParameterType>(filterValue).Listen(handler)` to subscribe only to events where the parameter of type `ParameterType` matches `filterValue`. Chaining `Where` clauses creates more specific, efficient subscriptions.
+5.  **Listen to Events:** Use `EventBus<YourEventType>.Listen(handler)` to subscribe to all events of a specific type.
+6.  **Filtered Listening:** Use `EventBus<YourEventType>.Where<ParameterType>(filterValue).Listen(handler)` to subscribe only to events where the parameter of type `ParameterType` matches `filterValue`. Chaining `Where` clauses creates more specific, efficient subscriptions.
 7.  **Access Parameters:** Inside your listener handler, use `eventInstance.Get<ParameterType>()` to retrieve the value of a parameter that was set via `Set<T>()`. The returned value will be the `parameterValue` originally passed to `Set`.
 8.  **Unsubscribe:** Keep the `IIListener` returned by `Listen()` and call `listener.Unsubscribe()` when you no longer need to listen.
 
@@ -33,20 +33,20 @@ This EventBus implementation provides a straightforward way to decouple differen
 ```csharp
 using Nopnag.EventBus;
 
-// --- Define Parameter Types (implementing IIParameter for filtering) ---
+// --- Define Parameter Types (implementing IParameter for filtering) ---
 
-// Represents the source entity, inheriting from Warrior and implementing IIParameter
-public class Source : Warrior, IIParameter { }
+// Represents the source entity, inheriting from Warrior and implementing IParameter
+public class Source : Warrior, IParameter { }
 
 // Represents the destination entity
-public class Destination : Warrior, IIParameter { }
+public class Destination : Warrior, IParameter { }
 
 // Represents the type of weapon used (could be an enum)
 public enum Weapon { Sword, Axe, Bow }
-public class WeaponType : object, IIParameter { }
+public class WeaponType : object, IParameter { }
 
 // Represents a numerical amount
-public class Amount : object, IIParameter { }
+public class Amount : object, IParameter { }
 
 // --- Define an entity (used by parameters) ---
 public class Warrior { /* ... warrior data ... */ }
@@ -96,7 +96,7 @@ public class CombatEventLogger : MonoBehaviour
 
   void OnEnable()
   {
-    _combatEventListener = EventBus.Listen<CombatEvent>(OnCombat);
+    _combatEventListener = EventBus<CombatEvent>.Listen(OnCombat);
   }
 
   void OnDisable()
@@ -136,14 +136,12 @@ public class SpecificCombatObserver : MonoBehaviour
     if (warriorToObserve == null) return;
 
     // --- Example 1: Listen when warriorToObserve attacks using a Sword ---
-    _swordAttackListener = EventBus.Query<CombatEvent>()
-                                   .Where<Source>(warriorToObserve)   // Filter by source instance
+    _swordAttackListener = EventBus<CombatEvent>.Where<Source>(warriorToObserve)   // Filter by source instance
                                    .Where<WeaponType>(Weapon.Sword) // Filter by weapon enum value
                                    .Listen(OnObservedWarriorSwordAttack);
 
     // --- Example 2: Listen when warriorToObserve receives exactly 15 damage ---
-    _heavyDamageListener = EventBus.Query<CombatEvent>()
-                                   .Where<Destination>(warriorToObserve) // Filter by destination instance
+    _heavyDamageListener = EventBus<CombatEvent>.Where<Destination>(warriorToObserve) // Filter by destination instance
                                    .Where<Amount>(15)                 // Filter by amount value
                                    .Listen(OnObservedWarriorTookHeavyDamage);
   }

@@ -78,7 +78,7 @@ namespace Nopnag.EventBusLib // Updated namespace
     }
 
     public static EventQuery<T> Where<TParameterType>(in object parameter)
-      where TParameterType : IIParameter
+      where TParameterType : IParameter
     {
       return SelfQuery.Where<TParameterType>(parameter);
     }
@@ -167,7 +167,7 @@ namespace Nopnag.EventBusLib // Updated namespace
       foreach (var type in _genericDictionary.Keys) _genericDictionary[type].UnSubscribeAll();
     }
 
-    public EventQuery<T> Where<TParameterType>(in object value) where TParameterType : IIParameter
+    public EventQuery<T> Where<TParameterType>(in object value) where TParameterType : IParameter
     {
       var parameterType = typeof(TParameterType);
       ParameterQuery<T, TParameterType> pq;
@@ -217,7 +217,7 @@ namespace Nopnag.EventBusLib // Updated namespace
   }
 
   public class ParameterQuery<T, TParameterType> : EventQuery<T>
-    where T : BusEvent where TParameterType : IIParameter
+    where T : BusEvent where TParameterType : IParameter
   {
     readonly Dictionary<object, EventQuery<T>> _valueDictionary;
 
