@@ -1,0 +1,23 @@
+{
+  "name": "com.nopnag.eventbus",
+  "version": "1.0.0",
+  "displayName": "Nopnag EventBus",
+  "description": "A flexible and queryable event bus system for Unity.",
+  "unity": "2021.3", 
+  "documentationUrl": "https://github.com/cihanozcelik/EventBus", 
+  "changelogUrl": "https://github.com/cihanozcelik/EventBus/blob/main/CHANGELOG.md", 
+  "licensesUrl": "https://github.com/cihanozcelik/EventBus/blob/main/LICENSE.md", 
+  "dependencies": {}, 
+  "keywords": [
+    "event",
+    "bus",
+    "messaging",
+    "publish",
+    "subscribe",
+    "nopnag"
+  ],
+  "author": {
+    "name": "Cihan Özçelik", 
+    "url": "https://github.com/cihanozcelik" 
+  }
+} 
