@@ -185,14 +185,14 @@ You can install this package using the Unity Package Manager:
 1.  Open the Package Manager (`Window` > `Package Manager`).
 2.  Click the `+` button in the top-left corner.
 3.  Select `Add package from git URL...`.
-4.  Enter the repository URL: `https://github.com/cihanozcelik/EventBus.git`
+4.  Enter the repository URL: `https://github.com/cihanozcelik/EventBusLib.git`
 5.  Click `Add`.
 
 Alternatively, you can add it directly to your `manifest.json` file in the `Packages` folder:
 ```json
 {
   "dependencies": {
-    "com.nopnag.eventbus": "https://github.com/cihanozcelik/EventBus.git",
+    "com.nopnag.eventbuslib": "https://github.com/cihanozcelik/EventBusLib.git",
     // ... other dependencies
   }
 }
