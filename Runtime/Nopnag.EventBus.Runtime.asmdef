@@ -1,6 +1,6 @@
 {
-	"name": "Nopnag.EventBus.Runtime",
-	"rootNamespace": "Nopnag.EventBus",
+	"name": "Nopnag.EventBusLib.Runtime",
+	"rootNamespace": "Nopnag.EventBusLib",
 	"references": [],
 	"includePlatforms": [],
 	"excludePlatforms": [],

@@ -1,4 +1,4 @@
-using Nopnag.EventBus;
+using Nopnag.EventBusLib;
 using NUnit.Framework;
 
 namespace Nopnag.EventBus.Tests
@@ -46,7 +46,7 @@ namespace Nopnag.EventBus.Tests
     public void TearDown()
     {
         // Ensure the bus is clean before each test runs
-        EventBus.ClearAll?.Invoke(); 
+        EventBusLib.EventBus.ClearAll?.Invoke(); 
     }
 
 

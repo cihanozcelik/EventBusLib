@@ -2,7 +2,8 @@
     "name": "Nopnag.EventBus.Tests",
     "rootNamespace": "Nopnag.EventBus.Tests",
     "references": [
-        "Nopnag.EventBus.Runtime"
+        "Nopnag.EventBus.Runtime",
+        "Nopnag.EventBusLib.Runtime"
     ],
     "includePlatforms": [
         "Editor"

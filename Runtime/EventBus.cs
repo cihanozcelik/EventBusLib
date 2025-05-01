@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Nopnag.EventBus // Updated namespace
+namespace Nopnag.EventBusLib // Updated namespace
 {
   public delegate void ListenerDelegate<T>(T @event);
 

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Nopnag.EventBus // Updated namespace
+namespace Nopnag.EventBusLib // Updated namespace
 {
   public enum EventLayer
   {
