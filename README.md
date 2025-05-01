@@ -1,4 +1,4 @@
-# EventBus
+# Nopnag EventBusLib
 
 A flexible and queryable event bus system for C# and Unity3D.
 
