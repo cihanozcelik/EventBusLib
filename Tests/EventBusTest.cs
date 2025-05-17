@@ -1,5 +1,6 @@
 using Nopnag.EventBusLib;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace Nopnag.EventBus.Tests
 {
@@ -37,18 +38,15 @@ namespace Nopnag.EventBus.Tests
       Tokat
     }
 
+    // New Event Type for re-entrancy test
+    public class AnotherTestEvent : BusEvent { }
+    // New Event Type for DoNotClearOnClearAllTest
+    public class DifferentEventForClearAll : BusEvent {}
+
     Warrior warrior1;
     Warrior warrior2;
     Warrior warrior3;
     Warrior warrior4;
-
-    [TearDown]
-    public void TearDown()
-    {
-        // Ensure the bus is clean before each test runs
-        EventBusLib.EventBus.ClearAll?.Invoke(); 
-    }
-
 
     [SetUp]
     public void Setup()
@@ -383,6 +381,159 @@ namespace Nopnag.EventBus.Tests
 
       // Ensure l6 is still unsubscribed (implicitly)
       // No need to explicitly check l6 as it calls Assert.Fail() if ever triggered.
+    }
+
+    [Test]
+    public void ListenerCanUnsubscribeItself()
+    {
+        IIListener listenerHandle = null;
+        int callCount = 0;
+        // Assign to local variable before lambda capture for safety with some C# versions/compiler behaviors
+        IIListener tempListenerHandle = null; 
+        tempListenerHandle = EventBus<OnHitEvent>.Listen(e =>
+        {
+            callCount++;
+            tempListenerHandle?.Unsubscribe(); // Use the captured local variable
+        });
+        listenerHandle = tempListenerHandle; // Assign to outer scope variable (though not strictly needed for this test logic)
+
+        var anEvent = new OnHitEvent();
+        EventBus<OnHitEvent>.Raise(anEvent); // First raise, listener runs and unsubscribes
+        EventBus<OnHitEvent>.Raise(anEvent); // Second raise, listener should not run
+
+        Assert.AreEqual(1, callCount, "Listener should have been called only once.");
+    }
+
+    [Test]
+    public void ListenerCanSubscribeAnotherListenerDuringRaise()
+    {
+        int listener1CallCount = 0;
+        int listener2CallCount = 0;
+        IIListener listener1Handle = null;
+        IIListener listener2Handle = null;
+
+        listener1Handle = EventBus<OnHitEvent>.Listen(e =>
+        {
+            listener1CallCount++;
+            if (listener1CallCount == 1) // Only subscribe Listener2 on the first call of Listener1
+            {
+                listener2Handle = EventBus<OnHitEvent>.Listen(e2 =>
+                {
+                    listener2CallCount++;
+                });
+            }
+        });
+
+        var anEvent = new OnHitEvent();
+        EventBus<OnHitEvent>.Raise(anEvent); 
+        Assert.AreEqual(1, listener1CallCount, "Listener1 called once for first raise.");
+        Assert.AreEqual(0, listener2CallCount, "Listener2 should not be called during the same raise it was subscribed in.");
+
+        EventBus<OnHitEvent>.Raise(anEvent); 
+        Assert.AreEqual(2, listener1CallCount, "Listener1 called again for second raise.");
+        Assert.AreEqual(1, listener2CallCount, "Listener2 should now be called for the second raise.");
+
+        // Cleanup
+        listener1Handle?.Unsubscribe();
+        listener2Handle?.Unsubscribe(); 
+    }
+
+    [Test]
+    public void ListenerCanRaiseAnotherEventSafely() // Renamed for clarity
+    {
+        bool onHitListenerCalled = false;
+        bool anotherEventListenerCalled = false;
+        int onHitCallCount = 0; 
+
+        var onHitSubscription = EventBus<OnHitEvent>.Listen(e => {
+            // Prevent re-entrancy for this specific listener if the event somehow looped
+            if (onHitCallCount > 0) return; 
+            onHitCallCount++;
+            
+            onHitListenerCalled = true;
+            EventBus<AnotherTestEvent>.Raise(new AnotherTestEvent());
+        });
+
+        var anotherSubscription = EventBus<AnotherTestEvent>.Listen(e => {
+            anotherEventListenerCalled = true;
+        });
+
+        EventBus<OnHitEvent>.Raise(new OnHitEvent());
+
+        Assert.IsTrue(onHitListenerCalled, "OnHitEvent listener should have been called.");
+        Assert.IsTrue(anotherEventListenerCalled, "AnotherTestEvent listener should have been called due to raise from OnHitEvent listener.");
+        
+        // Cleanup
+        onHitSubscription?.Unsubscribe();
+        anotherSubscription?.Unsubscribe();
+    }
+    
+    // --- END OF NEW TESTS ---
+
+    [Test]
+    public void StopPropagationAndResetPropagationTest()
+    {
+        var eventInstance = new OnHitEvent();
+        bool listener1CalledFirstRaise = false;
+        bool listener2CalledFirstRaise = false;
+        bool listener1CalledSecondRaise = false;
+        bool listener2CalledSecondRaise = false;
+
+        var sub1 = EventBus<OnHitEvent>.Listen(e => 
+        {
+            if (e == eventInstance) // Ensure it's our specific event instance
+            {
+                // For first raise, this listener will set its flag and stop propagation
+                // For second raise, it will just set its flag
+                if (!listener1CalledFirstRaise)
+                {
+                    listener1CalledFirstRaise = true;
+                    e.StopPropagation();
+                }
+                else
+                {
+                    listener1CalledSecondRaise = true;
+                }
+            }
+        });
+
+        var sub2 = EventBus<OnHitEvent>.Listen(e => 
+        {
+            if (e == eventInstance)  // Ensure it's our specific event instance
+            {
+                if (!listener1CalledFirstRaise) // Should only be called if listener1 wasn't (i.e. before first raise logic)
+                {
+                     // This block should ideally not be hit if testing StopPropagation from listener1
+                }
+                else if (listener1CalledFirstRaise && !listener1CalledSecondRaise) // After first raise, before second raise logic
+                {
+                    listener2CalledFirstRaise = true; // This flags an error if called on first raise
+                }
+                else // Second raise
+                {
+                    listener2CalledSecondRaise = true;
+                }
+            }
+        });
+
+        // First Raise
+        EventBus<OnHitEvent>.Raise(eventInstance);
+        Assert.IsTrue(listener1CalledFirstRaise, "Listener 1 should be called on first raise.");
+        Assert.IsFalse(listener2CalledFirstRaise, "Listener 2 should NOT be called on first raise due to StopPropagation.");
+
+        // Reset propagation for the same event instance
+        eventInstance.ResetPropagation();
+        Assert.IsFalse(eventInstance.IsPropagationStopped, "IsPropagationStopped should be false after ResetPropagation.");
+
+
+        // Second Raise (with the same instance)
+        EventBus<OnHitEvent>.Raise(eventInstance);
+        Assert.IsTrue(listener1CalledSecondRaise, "Listener 1 should be called on second raise.");
+        Assert.IsTrue(listener2CalledSecondRaise, "Listener 2 should also be called on second raise after ResetPropagation.");
+
+        // Cleanup
+        sub1.Unsubscribe();
+        sub2.Unsubscribe();
     }
   }
 } 

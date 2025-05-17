@@ -28,8 +28,6 @@ namespace Nopnag.EventBusLib // Updated namespace
 
   public static class EventBus
   {
-    public static Action ClearAll;
-
     public static EventQuery<TEvent> Query<TEvent>() where TEvent : BusEvent
     {
       return EventBus<TEvent>.SelfQuery;
@@ -47,19 +45,7 @@ namespace Nopnag.EventBusLib // Updated namespace
 
     static EventBus()
     {
-      EventBus.ClearAll += Clear;
-
       if (SelfQuery == null) SelfQuery = new EventQuery<T>();
-    }
-
-    public static void Clear()
-    {
-      SelfQuery = new EventQuery<T>();
-    }
-
-    public static void DoNotClearOnClearAll()
-    {
-      EventBus.ClearAll -= Clear;
     }
 
     public static IIListener Listen(ListenerDelegate<T> listener)
@@ -69,12 +55,8 @@ namespace Nopnag.EventBusLib // Updated namespace
 
     public static void Raise(T @event)
     {
+      if (SelfQuery == null) SelfQuery = new EventQuery<T>();
       SelfQuery.Raise(@event);
-    }
-
-    public static void UnSubscribeAll()
-    {
-      SelfQuery.UnSubscribeAll();
     }
 
     public static EventQuery<T> Where<TParameterType>(in object parameter)
@@ -121,7 +103,7 @@ namespace Nopnag.EventBusLib // Updated namespace
     {
       _isRaising = true;
 
-      foreach (var listener in _hash.ToArray())
+      foreach (var listener in _hash)
       {
         listener(@event);
         if (@event.IsPropagationStopped)
@@ -134,37 +116,34 @@ namespace Nopnag.EventBusLib // Updated namespace
 
       foreach (var type in _dictionary.Keys)
       {
-        _dictionary[type].Raise(@event);
-        if (@event.IsPropagationStopped)
+        if (_dictionary.TryGetValue(type, out var eventQuery))
         {
-          _isRaising = false;
-          ProcessOperationQueue();
-          return;
+          eventQuery.Raise(@event);
+          if (@event.IsPropagationStopped)
+          {
+            _isRaising = false;
+            ProcessOperationQueue();
+            return;
+          }
         }
       }
 
       foreach (var type in _genericDictionary.Keys)
       {
-        _genericDictionary[type].Raise(@event);
-        if (@event.IsPropagationStopped)
+        if (_genericDictionary.TryGetValue(type, out var eventQuery))
         {
-          _isRaising = false;
-          ProcessOperationQueue();
-          return;
+          eventQuery.Raise(@event);
+          if (@event.IsPropagationStopped)
+          {
+            _isRaising = false;
+            ProcessOperationQueue();
+            return;
+          }
         }
       }
 
       _isRaising = false;
       ProcessOperationQueue();
-    }
-
-    public virtual void UnSubscribeAll()
-    {
-      foreach (var listener in _hash.ToArray()) UnsubscribeInternal(listener);
-
-      foreach (var type in _dictionary.Keys) _dictionary[type].UnSubscribeAll();
-
-      foreach (var type in _genericDictionary.Keys) _genericDictionary[type].UnSubscribeAll();
     }
 
     public EventQuery<T> Where<TParameterType>(in object value) where TParameterType : IParameter

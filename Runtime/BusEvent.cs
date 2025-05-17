@@ -45,7 +45,7 @@ namespace Nopnag.EventBusLib // Updated namespace
 
     public virtual void ResetPropagation()
     {
-      IsPropagationStopped = true;
+      IsPropagationStopped = false;
     }
 
     public BusEvent Set<T>(T value) where T : class
@@ -62,7 +62,7 @@ namespace Nopnag.EventBusLib // Updated namespace
 
     public void StopPropagation()
     {
-      IsPropagationStopped = false;
+      IsPropagationStopped = true;
     }
   }
 
