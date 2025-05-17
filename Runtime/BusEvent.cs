@@ -3,19 +3,12 @@ using System.Collections.Generic;
 
 namespace Nopnag.EventBusLib // Updated namespace
 {
-  public enum EventLayer
-  {
-    Application,
-    Scene
-  }
 
   // Interface for parameter types, assuming it's needed by BusEvent
   public interface IParameter {}
 
   public class BusEvent
   {
-    public static EventLayer Layer = EventLayer.Scene;
-
     readonly Dictionary<Type, object> _dict;
     readonly Dictionary<Type, object> _genericDict;
 
@@ -64,10 +57,5 @@ namespace Nopnag.EventBusLib // Updated namespace
     {
       IsPropagationStopped = true;
     }
-  }
-
-  public class ApplicationLevelEvent : BusEvent
-  {
-    public new static EventLayer Layer = EventLayer.Application;
   }
 } 
