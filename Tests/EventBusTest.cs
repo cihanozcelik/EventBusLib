@@ -469,5 +469,71 @@ namespace Nopnag.EventBus.Tests
     }
     
     // --- END OF NEW TESTS ---
+
+    [Test]
+    public void StopPropagationAndResetPropagationTest()
+    {
+        var eventInstance = new OnHitEvent();
+        bool listener1CalledFirstRaise = false;
+        bool listener2CalledFirstRaise = false;
+        bool listener1CalledSecondRaise = false;
+        bool listener2CalledSecondRaise = false;
+
+        var sub1 = EventBus<OnHitEvent>.Listen(e => 
+        {
+            if (e == eventInstance) // Ensure it's our specific event instance
+            {
+                // For first raise, this listener will set its flag and stop propagation
+                // For second raise, it will just set its flag
+                if (!listener1CalledFirstRaise)
+                {
+                    listener1CalledFirstRaise = true;
+                    e.StopPropagation();
+                }
+                else
+                {
+                    listener1CalledSecondRaise = true;
+                }
+            }
+        });
+
+        var sub2 = EventBus<OnHitEvent>.Listen(e => 
+        {
+            if (e == eventInstance)  // Ensure it's our specific event instance
+            {
+                if (!listener1CalledFirstRaise) // Should only be called if listener1 wasn't (i.e. before first raise logic)
+                {
+                     // This block should ideally not be hit if testing StopPropagation from listener1
+                }
+                else if (listener1CalledFirstRaise && !listener1CalledSecondRaise) // After first raise, before second raise logic
+                {
+                    listener2CalledFirstRaise = true; // This flags an error if called on first raise
+                }
+                else // Second raise
+                {
+                    listener2CalledSecondRaise = true;
+                }
+            }
+        });
+
+        // First Raise
+        EventBus<OnHitEvent>.Raise(eventInstance);
+        Assert.IsTrue(listener1CalledFirstRaise, "Listener 1 should be called on first raise.");
+        Assert.IsFalse(listener2CalledFirstRaise, "Listener 2 should NOT be called on first raise due to StopPropagation.");
+
+        // Reset propagation for the same event instance
+        eventInstance.ResetPropagation();
+        Assert.IsFalse(eventInstance.IsPropagationStopped, "IsPropagationStopped should be false after ResetPropagation.");
+
+
+        // Second Raise (with the same instance)
+        EventBus<OnHitEvent>.Raise(eventInstance);
+        Assert.IsTrue(listener1CalledSecondRaise, "Listener 1 should be called on second raise.");
+        Assert.IsTrue(listener2CalledSecondRaise, "Listener 2 should also be called on second raise after ResetPropagation.");
+
+        // Cleanup
+        sub1.Unsubscribe();
+        sub2.Unsubscribe();
+    }
   }
 } 
