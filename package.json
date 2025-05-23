@@ -1,8 +1,8 @@
 {
   "name": "com.nopnag.eventbuslib",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "displayName": "Nopnag EventBus",
-  "description": "A flexible and queryable event bus system for Unity.",
+  "description": "A flexible and queryable event bus system for Unity with both static and instance-based APIs.",
   "unity": "6000.1", 
   "documentationUrl": "https://github.com/cihanozcelik/EventBus", 
   "changelogUrl": "https://github.com/cihanozcelik/EventBus/blob/main/CHANGELOG.md", 
@@ -14,7 +14,10 @@
     "messaging",
     "publish",
     "subscribe",
-    "nopnag"
+    "nopnag",
+    "instance",
+    "local",
+    "global"
   ],
   "author": {
     "name": "Cihan Özçelik", 
