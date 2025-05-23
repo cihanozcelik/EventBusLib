@@ -26,6 +26,7 @@ namespace Nopnag.EventBusLib // Updated namespace
     }
   }
 
+  // Static EventBus API (unchanged for backward compatibility)
   public static class EventBus
   {
     public static EventQuery<TEvent> Query<TEvent>() where TEvent : BusEvent
@@ -69,6 +70,32 @@ namespace Nopnag.EventBusLib // Updated namespace
       where TParameterType : class
     {
       return SelfQuery.Where(parameter);
+    }
+  }
+
+  // New instance-based LocalEventBus
+  public class LocalEventBus
+  {
+    private readonly Dictionary<Type, object> _eventQueries = new Dictionary<Type, object>();
+
+    public LocalEventBus()
+    {
+    }
+
+    // Instance API
+    public EventQuery<TEvent> On<TEvent>() where TEvent : BusEvent
+    {
+      var eventType = typeof(TEvent);
+      if (!_eventQueries.ContainsKey(eventType))
+      {
+        _eventQueries[eventType] = new EventQuery<TEvent>();
+      }
+      return (EventQuery<TEvent>)_eventQueries[eventType];
+    }
+
+    public void Raise<TEvent>(TEvent busEvent) where TEvent : BusEvent
+    {
+      On<TEvent>().Raise(busEvent);
     }
   }
 
