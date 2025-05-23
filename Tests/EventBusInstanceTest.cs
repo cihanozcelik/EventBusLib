@@ -1,8 +1,6 @@
-using Nopnag.EventBusLib;
 using NUnit.Framework;
-using static Nopnag.EventBusLib.EventBus;
 
-namespace Nopnag.EventBus.Tests
+namespace Nopnag.EventBusLib.Tests
 {
   public class EventBusInstanceTest
   {
@@ -22,16 +20,16 @@ namespace Nopnag.EventBus.Tests
     [Test]
     public void BackwardCompatibility_StaticAPIStillWorks()
     {
-      bool eventReceived = false;
-      var sourceObject = new object(); // Use same instance
+      var eventReceived = false;
+      var sourceObject  = new object(); // Use same instance
 
       // Use old static API
-      var listener = EventBus<TestEvent>.Where<Source>(sourceObject).Listen(e => eventReceived = true);
+      var listener = EventBus<TestEvent>.Where<Source>(sourceObject)
+        .Listen(e => eventReceived = true);
 
       var testEvent = new TestEvent();
       testEvent.Set<Source>(sourceObject); // Use same instance
-      EventBus<TestEvent>.Raise(testEvent);
-
+      EventBus.Raise(testEvent);
       Assert.IsTrue(eventReceived);
       listener.Unsubscribe();
     }
@@ -146,7 +144,7 @@ namespace Nopnag.EventBus.Tests
       instanceEventReceived = false;
 
       // Raise event on static - should not affect local
-      Raise(new TestEvent { Message = "Static event" });
+      EventBus.Raise(new TestEvent { Message = "Static event" });
       Assert.IsTrue(staticEventReceived);
       Assert.IsFalse(instanceEventReceived);
 
