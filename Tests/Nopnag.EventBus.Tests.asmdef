@@ -1,8 +1,7 @@
 {
     "name": "Nopnag.EventBus.Tests",
-    "rootNamespace": "Nopnag.EventBus.Tests",
+    "rootNamespace": "Nopnag.EventBusLib.Tests",
     "references": [
-        "Nopnag.EventBus.Runtime",
         "Nopnag.EventBusLib.Runtime"
     ],
     "includePlatforms": [
@@ -20,4 +19,4 @@
     ],
     "versionDefines": [],
     "noEngineReferences": false
-} 
+}
