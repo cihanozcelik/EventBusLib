@@ -11,7 +11,7 @@ namespace Nopnag.EventBusLib
   {
     struct ListenerNode
     {
-      public ListenerDelegate<T> Listener;
+      public ListenerRegistration<T> Registration;
       public int HashCode;
       public int BucketNext;
       public int PreviousOrNextFree;
@@ -34,8 +34,20 @@ namespace Nopnag.EventBusLib
       _nodes = new ListenerNode[initialCapacity];
     }
 
-    public void Add(ListenerDelegate<T> listener)
+    public ListenerRegistration<T> Find(ListenerDelegate<T> listener)
     {
+      var hashCode = GetHashCode(listener);
+      for (var current = _buckets[hashCode & (_buckets.Length - 1)] - 1;
+           current != -1; current = _nodes[current].BucketNext)
+        if (_nodes[current].HashCode == hashCode &&
+            Comparer.Equals(_nodes[current].Registration.Callback, listener))
+          return _nodes[current].Registration;
+      return null;
+    }
+
+    public void Add(ListenerRegistration<T> registration)
+    {
+      var listener = registration.Callback;
       var hashCode = GetHashCode(listener);
       var bucket = hashCode & (_buckets.Length - 1);
       for (var current = _buckets[bucket] - 1;
@@ -43,13 +55,13 @@ namespace Nopnag.EventBusLib
            current = _nodes[current].BucketNext)
       {
         if (_nodes[current].HashCode == hashCode &&
-            Comparer.Equals(_nodes[current].Listener, listener))
+            Comparer.Equals(_nodes[current].Registration.Callback, listener))
           return;
       }
 
       var index = AllocateNode();
       bucket = hashCode & (_buckets.Length - 1);
-      _nodes[index].Listener = listener;
+      _nodes[index].Registration = registration;
       _nodes[index].HashCode = hashCode;
       _nodes[index].BucketNext = _buckets[bucket] - 1;
       _nodes[index].PreviousOrNextFree = _last;
@@ -64,8 +76,9 @@ namespace Nopnag.EventBusLib
       _last = index;
     }
 
-    public void Remove(ListenerDelegate<T> listener)
+    public void Remove(ListenerRegistration<T> registration)
     {
+      var listener = registration.Callback;
       var hashCode = GetHashCode(listener);
       var bucket = hashCode & (_buckets.Length - 1);
       var previousInBucket = -1;
@@ -73,7 +86,7 @@ namespace Nopnag.EventBusLib
       while (index != -1)
       {
         if (_nodes[index].HashCode == hashCode &&
-            Comparer.Equals(_nodes[index].Listener, listener))
+            ReferenceEquals(_nodes[index].Registration, registration))
           break;
 
         previousInBucket = index;
@@ -100,7 +113,8 @@ namespace Nopnag.EventBusLib
       else
         _nodes[next].PreviousOrNextFree = previous;
 
-      _nodes[index].Listener = null;
+      _nodes[index].Registration = null;
+      registration.Detach();
       _nodes[index].HashCode = -1;
       _nodes[index].BucketNext = -1;
       _nodes[index].OrderNext = -1;
@@ -108,12 +122,22 @@ namespace Nopnag.EventBusLib
       _firstFree = index;
     }
 
+    public void Clear()
+    {
+      for (var index = _first; index != -1; index = _nodes[index].OrderNext)
+        _nodes[index].Registration.Detach();
+      Array.Clear(_buckets, 0, _buckets.Length);
+      Array.Clear(_nodes, 0, _nextUnused);
+      _first = _last = _firstFree = -1;
+      _nextUnused = 0;
+    }
+
     public bool Raise(T @event)
     {
       var index = _first;
       while (index != -1)
       {
-        var listener = _nodes[index].Listener;
+        var listener = _nodes[index].Registration.Callback;
         index = _nodes[index].OrderNext;
         listener(@event);
         if (@event.IsPropagationStopped) return false;

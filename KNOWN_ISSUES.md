@@ -1,3 +1,9 @@
+> Session cleanup update (pending Unity verification): ClearAll, readonly global
+> roots and registration-identity handles supersede EB-007 and the global-bus parts
+> of EB-014/EB-016 below. ResetPropagation exception unwinding also addresses EB-006.
+> Historical descriptions below document the pinned baseline, not the new API.
+> GlobalSessionLifetimeTests covers the new contracts; Unity results are pending.
+
 # EventBusLib Known Issues
 
 This document records implementation defects, unsafe public escape hatches, lifecycle
@@ -130,53 +136,20 @@ non-null sentinel token if needed.
 
 ### EB-006 — A throwing `ResetPropagation` override can permanently poison an event
 
-**Severity:** Critical  
-**Status:** Open exception-safety defect; missing regression test
-
-`EventQuery.Raise` increments `ActiveRaiseDepth` before calling the virtual
-`ResetPropagation`, but enters its `try/finally` only afterward. If the override or its
-property setter throws, depth is never decremented. Later raises of the same event are
-misclassified as nested: propagation is not reset and no new `RaiseUniqueId` is
-assigned. Parameter-query overrides repeat the same ordering.
-
-**Safe usage:** Do not override `ResetPropagation` or the propagation property with
-throwing behavior. Prefer the base implementation until depth cleanup is moved inside
-the protected `try/finally` region.
-
-**Evidence:** `Runtime/EventBus.cs:184-195,309-319,355-365`
-
-**Missing coverage:** Exceptions from `ResetPropagation`, propagation property access,
-and subsequent reuse of the same event instance.
+**Status:** Fixed in the session-cleanup implementation; Unity verification pending.
+EventDispatch now unwinds the event depth and active-dispatch counter if the override
+throws. GlobalSessionLifetimeTests.DispatchFailureDoesNotPermanentlyBlockCleanup
+covers repeated failure and subsequent cleanup. Exceptions still propagate; callbacks
+must not treat this as recovery of application state.
 
 ### EB-007 — Listener handles are delegate-based, not subscription-generation-based
 
-**Severity:** Critical  
-**Status:** Open lifetime correctness defect
-
-Listener registration is set-like per query: registering the same delegate twice
-creates only one listener entry, but every `Listen` call returns a new handle. Every
-handle unsubscribes by delegate equality rather than by a unique subscription ID.
-
-An old handle can therefore remove a later subscription:
-
-1. Subscribe delegate and retain handle A.
-2. Unsubscribe A.
-3. Subscribe the same delegate again and retain handle B.
-4. Call `A.Unsubscribe()` again; B's current registration is removed.
-
-Duplicate handles are not reference counted. A default `Listener` or a
-`Listener(null)` also throws when unsubscribed.
-
-**Safe usage:** Keep exactly one live handle per delegate/query registration, call it
-once, clear the stored handle, and never reuse stale handles.
-
-**Evidence:**
-
-- `Runtime/EventBus.cs:14-25,168-175,290-296`
-- `Runtime/OrderedListenerSet.cs:37-48,67-109`
-
-**Missing coverage:** Repeated unsubscribe, duplicate handles, stale handles after
-resubscribe, default handles, and null unsubscribe actions.
+**Status:** Fixed for handles returned by Listen; Unity verification pending.
+A registration object is its identity. Duplicate Listen shares that object; a new
+registration gets a new object. Unsubscribe requests are idempotent, including while
+pending. Removal/clear detaches the handle from both callback and query. Tests cover
+stale handles with/without ClearAll, duplicate handles, and deferred resubscription.
+Manually constructing the legacy Listener struct is outside these guarantees.
 
 ### EB-008 — Same-event reentrant raises share propagation and ID across buses
 
@@ -332,7 +305,8 @@ event without overwriting every relevant route can publish stale route values. T
 is no `Remove` or `ClearParameters`; `ResetPropagation` resets only the stop flag.
 
 Query filter dictionaries also retain route keys and empty branch objects after all
-listeners unsubscribe. Static roots retain them for the application/domain lifetime.
+listeners unsubscribe. Global roots retain them until EventBus.ClearAll; that lifecycle operation invalidates
+old filter queries and releases all route keys.
 Long-lived local buses retain them for the local bus lifetime.
 
 **Safe usage:** Define each reusable event's complete route state at its initialization
@@ -380,13 +354,15 @@ deep nested ordering.
 **Severity:** High  
 **Status:** Current lifetime limitation
 
-Every closed `EventBus<T>` owns a static root query. There is no supported clear,
-dispose, or domain-scoped reset operation. Listener delegates, unsubscribe closures,
+Every closed `EventBus<T>` owns a readonly static root query. EventBus.ClearAll
+clears initialized global roots in place; Unity hooks call it at Play startup and
+after Play teardown. Owner-driven unsubscribe is still required during a session. Listener delegates, unsubscribe closures,
 and route-key dictionaries hold strong references. Missing unsubscription can retain
 scene, map, run, or test objects after their intended lifetime.
 
 A `LocalEventBus` can be collected when the bus and all handles become unreachable,
-but an external listener handle retains its query and delegate closure. The bus itself
+but a live external listener handle retains its query and callback until unsubscribed
+or globally cleared. Returned handles release both references on removal. The bus itself
 has no `Dispose` or bulk-clear API.
 
 **Safe usage:** Assign every subscription handle to an explicit lifetime owner and

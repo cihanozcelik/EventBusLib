@@ -30,6 +30,26 @@ namespace Nopnag.EventBusLib // Updated namespace
   public static class EventBus
   {
     static long _raiseIdCounter;
+    // Separate from the shared raise-id counter: a first unobserved local raise
+    // must not allocate a global registry merely by assigning its dispatch id.
+    static class GlobalRoots
+    {
+      internal static readonly List<Action> Cleanups = new List<Action>();
+    }
+
+    internal static void RegisterGlobalRoot(Action cleanup) => GlobalRoots.Cleanups.Add(cleanup);
+
+    /// <summary>
+    /// Clears all initialized global event roots in place. Main-thread lifecycle operation:
+    /// call after owners shut down or before preparing new owners, never during dispatch.
+    /// Local buses and RaiseUniqueId are unaffected. Filter queries become invalid.
+    /// </summary>
+    public static void ClearAll()
+    {
+      if (EventDispatch.IsActive)
+        throw new InvalidOperationException("EventBus.ClearAll cannot run during event dispatch.");
+      for (var i = 0; i < GlobalRoots.Cleanups.Count; i++) GlobalRoots.Cleanups[i]();
+    }
 
     internal static long NextRaiseUniqueId()
     {
@@ -53,25 +73,39 @@ namespace Nopnag.EventBusLib // Updated namespace
 
   internal static class EventDispatch
   {
+    static int _activeScopes;
+    internal static bool IsActive => _activeScopes != 0;
     internal readonly struct Scope : IDisposable
     {
       readonly BusEvent _event;
 
       internal Scope(BusEvent busEvent)
       {
+        if (busEvent == null) throw new ArgumentNullException(nameof(busEvent));
         _event = busEvent;
         var isDepthZero = busEvent.ActiveRaiseDepth == 0;
         busEvent.ActiveRaiseDepth++;
-        if (isDepthZero)
+        _activeScopes++;
+        try
         {
-          busEvent.ResetPropagation();
-          busEvent.RaiseUniqueId = EventBus.NextRaiseUniqueId();
+          if (isDepthZero)
+          {
+            busEvent.ResetPropagation();
+            busEvent.RaiseUniqueId = EventBus.NextRaiseUniqueId();
+          }
+        }
+        catch
+        {
+          busEvent.ActiveRaiseDepth--;
+          _activeScopes--;
+          throw;
         }
       }
 
       public void Dispose()
       {
         _event.ActiveRaiseDepth--;
+        _activeScopes--;
       }
     }
 
@@ -90,11 +124,12 @@ namespace Nopnag.EventBusLib // Updated namespace
 
   public static class EventBus<T> where T : BusEvent
   {
-    public static EventQuery<T> SelfQuery;
+    public static readonly EventQuery<T> SelfQuery;
 
     static EventBus()
     {
-      if (SelfQuery == null) SelfQuery = new EventQuery<T>();
+      SelfQuery = new EventQuery<T>();
+      EventBus.RegisterGlobalRoot(SelfQuery.ClearGlobalRoot);
     }
 
     public static IIListener Listen(ListenerDelegate<T> listener)
@@ -108,7 +143,6 @@ namespace Nopnag.EventBusLib // Updated namespace
     /// </summary>
     public static void Raise(T @event)
     {
-      if (SelfQuery == null) SelfQuery = new EventQuery<T>();
       SelfQuery.Raise(@event);
     }
 
@@ -174,12 +208,12 @@ namespace Nopnag.EventBusLib // Updated namespace
     struct PendingOperation
     {
       public PendingOperationType Type;
-      public ListenerDelegate<T> Listener;
+      public ListenerRegistration<T> Registration;
 
-      public PendingOperation(PendingOperationType type, ListenerDelegate<T> listener)
+      public PendingOperation(PendingOperationType type, ListenerRegistration<T> registration)
       {
         Type = type;
-        Listener = listener;
+        Registration = registration;
       }
     }
 
@@ -191,6 +225,7 @@ namespace Nopnag.EventBusLib // Updated namespace
     PendingOperation[] _pendingOperations;
     int _pendingOperationCount;
     int _raiseDepth;
+    bool _invalidated;
 
     public EventQuery()
     {
@@ -208,14 +243,28 @@ namespace Nopnag.EventBusLib // Updated namespace
     /// registering it again appends it to the end. Mutations requested while this query
     /// is dispatching are applied after its outermost dispatch completes.
     /// </summary>
-    public virtual IIListener Listen(ListenerDelegate<T> @event)
+    public virtual IIListener Listen(ListenerDelegate<T> listener)
     {
+      RequireValid();
+      if (listener == null) throw new ArgumentNullException(nameof(listener));
+      var registration = _listeners.Find(listener);
+      // Resolve the eventual registration without changing the active traversal.
+      for (var i = 0; i < _pendingOperationCount; i++)
+      {
+        var operation = _pendingOperations[i];
+        if (!Equals(operation.Registration.Callback, listener)) continue;
+        if (operation.Type == PendingOperationType.Subscribe)
+          registration = operation.Registration;
+        else if (ReferenceEquals(registration, operation.Registration))
+          registration = null;
+      }
+      if (registration != null) return registration;
+      registration = new ListenerRegistration<T>(this, listener);
       if (_raiseDepth > 0)
-        EnqueueOperation(PendingOperationType.Subscribe, @event);
+        EnqueueOperation(PendingOperationType.Subscribe, registration);
       else
-        _listeners.Add(@event);
-
-      return new Listener(() => UnsubscribeInternal(@event));
+        _listeners.Add(registration);
+      return registration;
     }
 
     /// <summary>
@@ -226,6 +275,7 @@ namespace Nopnag.EventBusLib // Updated namespace
     /// </summary>
     public virtual void Raise(T @event)
     {
+      RequireValid();
       using (EventDispatch.Enter(@event))
       {
         _raiseDepth++;
@@ -267,6 +317,7 @@ namespace Nopnag.EventBusLib // Updated namespace
     /// </summary>
     public EventQuery<T> Where<TParameterType>(in object value) where TParameterType : IParameter
     {
+      RequireValid();
       var parameterType = typeof(TParameterType);
       ParameterQuery<T, TParameterType> pq;
       if (!_dictionary.ContainsKey(parameterType))
@@ -287,6 +338,7 @@ namespace Nopnag.EventBusLib // Updated namespace
     /// </summary>
     public EventQuery<T> Where<TParameterType>(in TParameterType value) where TParameterType : class
     {
+      RequireValid();
       var parameterType = typeof(TParameterType);
       GenericParameterQuery<T, TParameterType> pq;
       if (!_genericDictionary.ContainsKey(parameterType))
@@ -310,26 +362,77 @@ namespace Nopnag.EventBusLib // Updated namespace
         var operation = _pendingOperations[i];
         _pendingOperations[i] = default(PendingOperation);
         if (operation.Type == PendingOperationType.Subscribe)
-          _listeners.Add(operation.Listener);
+          _listeners.Add(operation.Registration);
         else
-          _listeners.Remove(operation.Listener);
+          _listeners.Remove(operation.Registration);
       }
     }
 
-    void EnqueueOperation(PendingOperationType type, ListenerDelegate<T> listener)
+    void EnqueueOperation(PendingOperationType type, ListenerRegistration<T> registration)
     {
       if (_pendingOperationCount == _pendingOperations.Length)
         Array.Resize(ref _pendingOperations, _pendingOperations.Length * 2);
 
-      _pendingOperations[_pendingOperationCount++] = new PendingOperation(type, listener);
+      _pendingOperations[_pendingOperationCount++] = new PendingOperation(type, registration);
     }
 
-    void UnsubscribeInternal(ListenerDelegate<T> @event)
+    internal void UnsubscribeInternal(ListenerRegistration<T> registration)
     {
       if (_raiseDepth > 0)
-        EnqueueOperation(PendingOperationType.Unsubscribe, @event);
+        EnqueueOperation(PendingOperationType.Unsubscribe, registration);
       else
-        _listeners.Remove(@event);
+        _listeners.Remove(registration);
+    }
+
+    protected void RequireValid()
+    {
+      if (_invalidated)
+        throw new ObjectDisposedException(GetType().Name, "This filter query was invalidated by EventBus.ClearAll. Prepare a new query.");
+    }
+
+    internal void ClearGlobalRoot() => ClearTree(false);
+
+    internal virtual void ClearTree(bool invalidate)
+    {
+      for (var i = 0; i < _orderedQueries.Count; i++) _orderedQueries[i].ClearTree(true);
+      for (var i = 0; i < _orderedGenericQueries.Count; i++) _orderedGenericQueries[i].ClearTree(true);
+      _dictionary.Clear();
+      _genericDictionary.Clear();
+      _orderedQueries.Clear();
+      _orderedGenericQueries.Clear();
+      _listeners.Clear();
+      for (var i = 0; i < _pendingOperationCount; i++) _pendingOperations[i].Registration.Detach();
+      Array.Clear(_pendingOperations, 0, _pendingOperationCount);
+      _pendingOperationCount = 0;
+      _invalidated = invalidate;
+    }
+  }
+
+  // A registration object is its identity. Duplicate Listen calls share this identity;
+  // a later registration of the same delegate always gets a different object.
+  internal sealed class ListenerRegistration<T> : IIListener where T : BusEvent
+  {
+    EventQuery<T> _query;
+    bool _unsubscribeRequested;
+    internal ListenerDelegate<T> Callback { get; private set; }
+
+    internal ListenerRegistration(EventQuery<T> query, ListenerDelegate<T> callback)
+    {
+      _query = query;
+      Callback = callback;
+    }
+
+    public void Unsubscribe()
+    {
+      if (_query == null || _unsubscribeRequested) return;
+      _unsubscribeRequested = true;
+      _query.UnsubscribeInternal(this);
+    }
+
+    internal void Detach()
+    {
+      _query = null;
+      Callback = null;
     }
   }
 
@@ -345,6 +448,7 @@ namespace Nopnag.EventBusLib // Updated namespace
 
     public override void Raise(T @event)
     {
+      RequireValid();
       using (EventDispatch.Enter(@event))
       {
         var type = typeof(TParameterType);
@@ -357,6 +461,7 @@ namespace Nopnag.EventBusLib // Updated namespace
 
     public EventQuery<T> Where(in object value)
     {
+      RequireValid();
       if (!_valueDictionary.ContainsKey(value))
       {
         var eq = new EventQuery<T>();
@@ -364,6 +469,13 @@ namespace Nopnag.EventBusLib // Updated namespace
       }
 
       return _valueDictionary[value];
+    }
+
+    internal override void ClearTree(bool invalidate)
+    {
+      foreach (var child in _valueDictionary.Values) child.ClearTree(true);
+      _valueDictionary.Clear();
+      base.ClearTree(invalidate);
     }
   }
 
@@ -379,6 +491,7 @@ namespace Nopnag.EventBusLib // Updated namespace
 
     public override void Raise(T @event)
     {
+      RequireValid();
       using (EventDispatch.Enter(@event))
       {
         var type = typeof(TParameterType);
@@ -391,6 +504,7 @@ namespace Nopnag.EventBusLib // Updated namespace
 
     public EventQuery<T> Where(in object value)
     {
+      RequireValid();
       if (!_valueDictionary.ContainsKey(value))
       {
         var eq = new EventQuery<T>();
@@ -398,6 +512,13 @@ namespace Nopnag.EventBusLib // Updated namespace
       }
 
       return _valueDictionary[value];
+    }
+
+    internal override void ClearTree(bool invalidate)
+    {
+      foreach (var child in _valueDictionary.Values) child.ClearTree(true);
+      _valueDictionary.Clear();
+      base.ClearTree(invalidate);
     }
   }
 }
