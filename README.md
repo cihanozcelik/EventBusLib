@@ -112,9 +112,34 @@ private static void Publish(GamePausedEvent evt)
 ```
 
 Each closed `EventBus<T>` owns one static root `EventQuery<T>`. Listener delegates stay
-there until unsubscribed or the application domain resets. Filter keys and query
-branches remain in the static tree even after their last listener unsubscribes. There
-is no supported bulk clear or dispose operation.
+there until unsubscribed or `EventBus.ClearAll()` runs. Unsubscribe alone retains
+filter keys; ClearAll releases all global filter keys and subscriptions in place.
+The root identity remains stable, while every old filter query becomes invalid.
+
+### Global lifecycle cleanup
+
+`EventBus.ClearAll()` is a main-thread lifecycle operation, after old owners finish
+shutdown or before new owners prepare. It clears every initialized global event type;
+there are no persistent event types or opt-out flags. It never clears local buses,
+resets RaiseUniqueId, or replaces global roots. Initialized generic types register
+one cleanup delegate during their first preparation; no reflection is used.
+
+Unity integration calls it at SubsystemRegistration before scene preparation and
+at EnteredEditMode after Play teardown. It does not run on individual scene unloads.
+Scene reload must remain enabled for consumers that reconstruct scene-owned graphs.
+Domain-reload-disabled Play still needs application resource and lifecycle tests.
+
+ClearAll rejects any active dispatch (including local and nested dispatch) before
+mutating any root. It must not be called from a listener or ResetPropagation override.
+Retained filtered queries throw ObjectDisposedException on Listen, Where, or Raise;
+prepare new filters for the next session. Root queries remain usable. Old listener
+handles become inert and release their callback and query references, even if a
+caller retains the handle. Repeated cleanup is supported. External references to
+payload objects and event parameter dictionaries remain the caller's responsibility.
+
+Normal raises reuse prepared storage. Root and registration construction, rebuilding
+filters, and first registration of each generic event type belong to preparation.
+Cleanup and subsequent preparation are not interactive gameplay operations.
 
 ### Instance-based local bus
 
@@ -181,12 +206,15 @@ Listener semantics:
 - The same delegate registered more than once on the same query is stored once.
 - The same delegate registered on different queries is independent and can run once
   per matching query.
-- Unsubscribe removes by delegate equality.
+- Unsubscribe removes only the registration identified by its handle.
 - Unsubscribe followed by a new subscription appends the delegate to the end of that
   query's order.
-- Handles are not reference counted or generation protected. Call one owned handle
-  exactly once and discard it; an old handle can remove a later registration of the
-  same delegate. See [EB-007](KNOWN_ISSUES.md#eb-007--listener-handles-are-delegate-based-not-subscription-generation-based).
+- Handles returned by Listen identify a registration, not only a delegate. Repeated
+  Unsubscribe is harmless; an old handle cannot remove a later registration of the
+  same delegate, including after ClearAll. Duplicate Listen calls share a registration
+  (not reference counting); unsubscribing either handle ends that registration.
+- Registrations removed during dispatch remain callable until that query's outermost
+  dispatch completes, preserving existing deferred-mutation ordering.
 - A default `Listener` or `Listener(null)` is invalid and throws on unsubscribe.
 
 Avoid anonymous runtime lambdas when ownership and allocation matter. Store a stable
@@ -448,13 +476,11 @@ caller. EventBusLib does not catch, aggregate, log, or continue to later listene
 Remaining listeners and branches are skipped.
 
 Dispatch depth and pending operations are normally restored by `finally`. A throwing
-override of `ResetPropagation` occurs before that protected region in the current
-implementation and can poison the event instance; do not override it with throwing
-behavior. See [EB-006](KNOWN_ISSUES.md#eb-006--a-throwing-resetpropagation-override-can-permanently-poison-an-event).
+ResetPropagation override unwinds both event depth and the active-dispatch guard
+before propagating its exception. Overrides must still be side-effect-free.
 
-Null events and listeners are required setup errors. Current validation is late and
-can surface as `NullReferenceException`; validate them before registration or
-publication.
+Null events and listeners are required setup errors and now throw ArgumentNullException
+before dispatch or registration. Invalidated filter queries reject use before mutation.
 
 ## Public API reference
 
@@ -485,6 +511,7 @@ reference-type marker that identifies one route dimension.
 |---|---|
 | `Query<TEvent>()` | Return the global root query for the exact event type. |
 | `Raise<TEvent>(TEvent)` | Publish through the exact global event root. |
+| `ClearAll()` | Clear all initialized global roots in place at a lifecycle boundary. |
 
 ### `EventBus<TEvent>`
 
@@ -493,10 +520,10 @@ reference-type marker that identifies one route dimension.
 | `Listen` | Register a direct global listener. |
 | `Raise` | Publish through this exact global root. |
 | marker/class `Where` overloads | Get or create a routed query branch. |
-| public `SelfQuery` field | Legacy mutable root field; consumers must treat it as read-only. |
+| public readonly `SelfQuery` field | Stable global root; cannot be replaced. |
 
-Never replace or null `SelfQuery`. `Raise` can recreate a null root, while other entry
-points have inconsistent null behavior and existing listeners can be disconnected.
+SelfQuery is now readonly. Source code that assigned the old mutable field must use
+ClearAll at a lifecycle boundary instead; precompiled consumers must be rebuilt.
 
 ### `LocalEventBus`
 
@@ -535,8 +562,10 @@ not dispatched by its override. Use bus/query `Where` methods instead. See
 
 - `ListenerDelegate<T>` is the callback delegate type.
 - `IIListener.Unsubscribe()` is the ownership interface returned by `Listen`.
-- `Listener` is the public struct implementation. Its public constructor accepts the
-  unsubscribe `Action`, and `Unsubscribe()` invokes that action.
+- `Listen` returns an internal registration object whose identity and lifetime are
+  tracked by its query. Removed registrations release their callback references.
+- `Listener` remains a legacy public struct accepting an unsubscribe Action; manually
+  constructed instances do not gain the registration-identity guarantees.
 
 Prefer the returned `IIListener`; do not manually construct `Listener` values.
 
@@ -555,7 +584,8 @@ Known allocation points include:
 - every `EventQuery` constructor: dictionaries, lists, listener arrays, and pending
   operation storage;
 - first static closed-generic use and first `LocalEventBus.On<T>`;
-- every `Listen`: unsubscribe closure plus possible interface boxing and storage growth;
+- each new registration from `Listen`: one handle object and possible storage growth;
+  duplicate Listen on an existing registration returns its existing handle;
 - every new `Where` type/value branch and dictionary/list growth;
 - the fifth simultaneous pending mutation on one active query and later buffer growth;
 - value types passed through object-based `Set`/`Where` APIs;
